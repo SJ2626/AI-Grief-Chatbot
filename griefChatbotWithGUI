@@ -1,0 +1,303 @@
+from openai import OpenAI
+import speech_recognition as sr
+import pyttsx3
+import pyaudio
+from dotenv import load_dotenv
+import os
+import sys
+from elevenlabs.client import ElevenLabs
+from elevenlabs import client, voices, stream
+from io import BytesIO
+import httpx
+import tkinter as tk
+import time
+
+load_dotenv()
+client = httpx.Client(verify=False)
+r = sr.Recognizer()
+messageLog = []
+openAIClient = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+elevenlabs = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+currentID = None
+printVoices = ""
+namesToID = []
+useVoiceID =""
+prompt = ""
+type = ""
+done = False
+
+def priming():
+    global currentID
+    prime = openAIClient.responses.create(
+        model="gpt-4.1-nano",
+        input = f"Today you'll be talking to someone, you'll be acting as their {relationshipToUser} that just died, you called them {name}"
+    )
+    current_response_id = prime.id
+    primeTwo = openAIClient.responses.create(
+        model="gpt-4.1-nano",
+        input = f"You are my {relationshipToChatBot} that just died.",
+        previous_response_id=current_response_id
+    )
+         currentID = backgroundOne.id
+        relationshipToUserLabel.place_forget()
+        relationshipToUserInput.place_forget()
+        relationshipToChatBotLabel.place_forget()
+        relationshipToChatBotInput.place_forget()
+        nameLabel.place_forget()
+        nameInput.place_forget()
+        backgroundLabel.place_forget()
+        backgroundInput.place_forget()
+        submitPriming.place_forget()
+        typeOrTalk()
+
+def typingInput():
+    global prompt
+    prompt = typeInput.get('1.0', tk.END).strip()
+    typeLabel.place_forget()
+    displayUserMessage.config(text=f"User: {prompt}")
+    messageContent()
+    
+def typeOrTalk(event = None):
+    global type, prompt
+    type = talkTypeInput.get('1.0', tk.END).strip()
+    if type.lower() == "type" or type.lower() == "talk":
+        talkType.place_forget()
+        talkTypeInput.place_forget()
+    else:
+        talkType.place(x=210, y = 40, width = 300, height = 20)
+        talkTypeInput.place(x=210, y = 70, width = 300, height = 20)
+    if type.lower() == "type":
+        typeLabel.place(x=210, y = 40, width = 300, height = 20)
+        typeInput.delete('1.0', tk.END)
+        typeInput.place(x=210, y= 70, width = 300, height = 40)
+        captureTypeInput.place(x=260, y = 120, width = 200)
+    elif type.lower() == "talk":
+        talkTypeInput.delete('1.0', tk.END)
+        talkTypeInput.config(text="Speak now")
+        prompt = recordText().strip()
+        displayUserMessage.config(text=f"User: {prompt}")
+        speakNow.place_forget()
+        print(f"User: {prompt}")
+        messageContent()
+
+def messageContent(event = None):
+    global prompt,currentID, finalName, done     
+    displayUserMessage.place(x=210, y=40, width = 300, height = 20)
+    messageLog.append({"role": name, "message" : prompt})
+    prompt = prompt.strip()
+    if prompt[-3:].lower() == "bye" or prompt[-3:].lower() == 'cya':
+        done = True
+        use_voice("Goodbye")
+        chatbotTranscript.config(text="Goodbye")
+        chatbotTranscript.place(x=210, y = 120, width = 300, height = 40)
+        messageLog.append({"role" : finalName, "message" :"Goodbye"})
+        wantLog()
+    else: 
+        response = openAIClient.responses.create(
+            model="gpt-4.1-nano",
+            input = prompt,
+            previous_response_id=currentID
+        )
+        currentID = response.id
+        temp = response.output_text
+        h=0
+        for i in range(int(len(temp)/50)):
+            temp = temp[:i*50 + 2*i] + "\n" +temp[i*50 +2*i:]
+            h+=20
+        chatbotTranscript.config(text=temp)
+        chatbotTranscript.place(x=160, y = 150, width = 400, height = h)
+        use_voice(response.output_text)
+        print(response.output_text)
+        messageLog.append({"role" : finalName, "message" : temp})
+        displayUserMessage.place_forget()
+        typeOrTalk()
+
+def recordText():
+    global done
+    while(not done):
+        try:
+            with sr.Microphone() as source2:
+                print("Speak now: ")
+                r.adjust_for_ambient_noise(source2, duration = .5)
+                r.pause_threshold = 2
+                audio2 = r.listen(source2)
+                myText = r.recognize_google(audio2)
+                speakNow.place_forget()
+                return myText
+
+        except sr.RequestError as e:
+            print("Could not request results; {0}".format(e))
+        except sr.UnknownValueError:
+            print("Unknown error occurred")
+
+def wantLog():
+    typeLabel.place_forget()
+    typeInput.place_forget()
+    captureTypeInput.place_forget()
+    chatbotTranscript.place_forget()
+    printlogLabel = tk.Label(gui, text="Do you want the message log? ", bg="light blue") 
+    printlogLabel.place(x=210,y=40,width=300,height=20) 
+    wantslog = tk.Button(gui, text="Yes", command=printLog, bg="light blue") 
+    wantslog.place(x=285, y=70, width = 50)
+    doesntWantLog = tk.Button(gui, text="No", command = quitProgram, bg="light blue")
+    doesntWantLog.place(x=385, y=70, width = 50)
+    def quitProgram():
+    quit(1)
+
+def printLog():
+    temp = ""
+    for i in range(len(messageLog)):
+        temp +=(f"{messageLog[i]["role"]} : {messageLog[i]["message"]} \n")
+    log = tk.Label(gui, text=temp, bg="light blue")
+    log.place(x=210, y=70, width=300)
+
+def findFiles(location):
+    location = location.strip()
+    load_dotenv()
+    recordings = []
+    for file in os.listdir(location):
+        recordings.append(BytesIO(open(f"{location}/{file}", "rb").read()))
+    return recordings
+
+def getVoiceVars():
+    voiceName = nameInput.get('1.0', tk.END)
+    filePath = fileInput.get('1.0', tk.END)
+    voice = elevenlabs.voices.ivc.create(name=voiceName, files=findFiles(filePath))
+    moveToList()
+
+def createVoice():
+    haveNoVoiceID.place_forget()
+    haveVoiceID.place_forget()
+    title.place_forget()
+    haveID.place_forget()
+    nameLabel.pack()
+    nameInput.pack()
+    fileLabel.pack()
+    fileInput.pack()
+    name_submit.pack()
+    
+def use_voice(message):
+    audio_stream = elevenlabs.text_to_speech.stream(
+        text=message,
+        voice_id=useVoiceID,
+        model_id="eleven_multilingual_v2",
+    )
+    stream(audio_stream)
+
+def primingVars():
+    global relationshipToChatBot, relationshipToUser, name, background
+    relationshipToChatBot = relationshipToChatBotInput.get("1.0", tk.END).strip()
+    relationshipToUser = relationshipToUserInput.get("1.0", tk.END).strip()
+    name = nameInput.get("1.0", tk.END).strip()
+    background = backgroundInput.get("1.0", tk.END).strip()
+    priming()
+
+def primingGUI(): 
+    relationshipToUserLabel.place(x=210, y = 40, width = 300) 
+    relationshipToUserInput.place(x=210, y = 70, width = 300, height = 20) 
+    relationshipToChatBotLabel.place(x=210, y = 100, width = 300) 
+    relationshipToChatBotInput.place(x=210, y = 130, width = 300, height = 20)
+    nameLabel.place(x=210, y = 160, width = 300) 
+    nameInput.place(x=210, y = 190, width = 300, height = 20)
+    backgroundLabel.place(x=210, y = 220, width = 300)
+    backgroundInput.place(x=210, y = 250, width = 300, height = 40) 
+    submitPriming.place(x=260, y=300, width = 200, height = 20)
+
+def getVoiceInput(event = None):
+    wrongName = True
+    global useVoiceID, finalName
+    useVoiceID = voiceInput.get('1.0', tk.END).strip()
+    for name in namesToID:
+        if useVoiceID.lower() == name["name"].lower():
+            useVoiceID = name["id"]
+            wrongName = False
+            finalName = name["name"]
+    if not wrongName:
+        voiceIDLabel.place_forget()
+        voiceInput.place_forget()
+        listOfVoices.place_forget()
+        primingGUI()
+
+def voiceIDFind():
+    h=0
+    for i in range(len(clonedVoices.voices)):
+        h+=18
+    needIDList.place_forget()
+    needList.place_forget()
+    dontNeedList.place_forget()
+    voiceIDLabel.place(x=210, y=60, width = 300)
+    voiceInput.place(x=210, y=80, width = 300, height = 30)
+    listOfVoices.place(x=210, y=120, width = 300, height = h)
+    
+def voiceIDNoList():
+    needIDList.place_forget()
+    needList.place_forget()
+    dontNeedList.place_forget()
+    voiceIDLabel.place(x=210, y=60, width = 300)
+    voiceInput.place(x=210, y=80, width = 300, height = 30)
+
+def moveToList():
+    haveVoiceID.place_forget()
+    haveNoVoiceID.place_forget()
+    nameInput.place_forget()
+    nameLabel.place_forget()
+    fileInput.place_forget()
+    fileLabel.place_forget()
+    haveID.place_forget()
+    name_submit.pack_forget()
+    needIDList.place(x=290, y=40, width = 140)
+    needList.place(x=285, y=65, width = 50)
+    dontNeedList.place(x=385, y=65, width = 50)
+
+
+clonedVoices = (elevenlabs.voices.search(category="cloned"))
+for voice in clonedVoices.voices:
+    printVoices += (f"{voice.name}\n")
+    namesToID.append({"name" : voice.name, "id" : voice.voice_id})
+
+#GUI set up below    
+gui = tk.Tk()
+gui.geometry("720x480")
+gui.title("Chatbot")
+gui.configure(bg="lightblue")
+title = tk.Label(gui, text="Talk to a grief chatbot", bg="lightblue")
+title.place(x=300, y=10, width = 120)
+haveID = tk.Label(gui, text = "Do you need to create a voice ID?", bg="lightblue")
+haveID.place(x=260, y=40, width = 200)
+nameLabel = tk.Label(gui, text="What do you want to call this voice?", bg="lightblue")
+nameInput = tk.Text(gui, height=5, bg="lightblue")
+fileLabel = tk.Label(gui, text="What is the file path to the recordings?", bg="lightblue")
+fileInput = tk.Text(gui, height=5, bg="lightblue")
+needIDList = tk.Label(gui, text="Do you need a list of IDs?", bg="lightblue")
+voiceIDLabel = tk.Label(gui, text = "Whose voice do you want to use? ", bg="lightblue")
+listOfVoices = tk.Label(gui, text = printVoices, bg="lightblue")
+voiceIDLabel = tk.Label(gui, text = "Whose voice do you want to use? ", bg="lightblue")
+voiceInput = tk.Text(gui, bg="lightblue")
+voiceInput.bind("<KeyRelease>", getVoiceInput)
+relationshipToUserLabel = tk.Label(gui,text = "They were your: ", bg="lightblue")
+relationshipToUserInput = tk.Text(gui, bg="lightblue")
+relationshipToChatBotLabel = tk.Label(gui, text = "You were their: ", bg="lightblue")
+relationshipToChatBotInput = tk.Text(gui, bg="lightblue")
+nameLabel = tk.Label(gui, text = "This person called you: ", bg="lightblue")
+nameInput = tk.Text(gui, bg="lightblue")
+backgroundLabel = tk.Label(gui, text = "Any other info that you would like to give: ", bg="lightblue")
+backgroundInput = tk.Text(gui, bg="lightblue")
+talkType = tk.Label(gui, text="Would you like to talk or type?", bg="lightblue")
+talkTypeInput = tk.Text(gui, bg="lightblue")
+talkTypeInput.bind("<KeyRelease>", typeOrTalk)
+typeLabel = tk.Label(gui, text="Type your message below.", bg="lightblue")
+typeInput = tk.Text(gui, bg="lightblue")
+captureTypeInput = tk.Button(gui, text="Send", command=typingInput, bg="lightblue")
+submitPriming = tk.Button(gui, text="Submit", command=primingVars, bg="lightblue")
+needList = tk.Button(gui, text="Yes", command=voiceIDFind, bg="lime green")
+dontNeedList = tk.Button(gui, text="No", command = voiceIDNoList, bg="firebrick2")
+haveNoVoiceID = tk.Button(gui, text="Yes", command=createVoice, bg="lime green")
+haveNoVoiceID.place(x=285, y=65, width = 50,)
+haveVoiceID = tk.Button(gui, text="No", command = moveToList, bg="firebrick2")
+haveVoiceID.place(x=385, y=65, width = 50)
+speakNow = tk.Label(gui, text="Speak now", bg="lightblue")
+displayUserMessage = tk.Label(gui, text=f"User: {prompt}", bg="lightblue")
+chatbotTranscript = tk.Label(gui, text="", bg="lightblue")
+name_submit = tk.Button(gui, text="Submit", command=getVoiceVars, bg="lightblue")
+
+gui.mainloop()
