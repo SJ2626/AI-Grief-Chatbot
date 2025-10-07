@@ -1,0 +1,139 @@
+from openai import OpenAI
+import speech_recognition as sr
+import pyttsx3
+import pyaudio
+from dotenv import load_dotenv
+import os
+from elevenlabs.client import ElevenLabs
+from elevenlabs import client, voices, stream
+from io import BytesIO
+import httpx
+
+load_dotenv()
+client = httpx.Client(verify=False)
+r = sr.Recognizer()
+messageLog = []
+openAIClient = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+elevenlabs = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+current_id = None
+
+def priming(current_response_id):
+    relationshipToUser = input("They were your: ")
+    relationshipToChatBot = input("You were their: ")
+    name = input("This person called you: ")
+    background = input("Any other info that you would like to give: ")
+    prime = openAIClient.responses.create(
+        model="gpt-4.1-nano",
+        input = f"Today you'll be talking to someone, you'll be acting as their {relationshipToUser} that just died, you called them {name}"
+    )
+    #print(prime.output_text)
+    current_response_id = prime.id
+    primeTwo = openAIClient.responses.create(
+        model="gpt-4.1-nano",
+        input = f"You are my {relationshipToChatBot} that just died.",
+        previous_response_id=current_response_id
+    )
+    #print(primeTwo.output_text)
+    current_response_id = primeTwo.id
+    backgroundOne = openAIClient.responses.create(
+        model="gpt-4.1-nano",
+        input = f"They also want you to remeber that {background}, when they say you they're refering to you chatGPT.",
+        previous_response_id=current_response_id
+    )
+    current_response_id = backgroundOne.id
+    return current_response_id
+
+def messageContent(current_response_id):
+    talk = input("Would you like to talk or type? ")
+    done = False
+    while not done:
+        if talk.lower() == "type":
+            prompt = input("Prompt: ")
+        else:
+            prompt = recordText()
+            print(f"User: {prompt}")
+        messageLog.append({"role": "User", "message" : prompt})
+        if prompt.lower() == 'bye' or prompt.lower() == 'goodbye' or prompt.lower() == 'cya':
+            use_voice(voiceID, "Goodbye")
+            print("Goodbye")
+            messageLog.append({"role" : "Chatbot", "message" :"Goodbye"})
+            break
+        response = openAIClient.responses.create(
+            model="gpt-4.1-nano",
+            input = prompt,
+            previous_response_id=current_response_id
+        )
+        current_response_id = response.id
+        use_voice(voiceID, response.output_text)
+        print(response.output_text)
+        messageLog.append({"role" : "Chatbot", "message" : response.output_text})
+
+def recordText():
+    waiting = False
+    while(1):
+        try:
+            if not waiting:
+                print("Speak now:")
+            with sr.Microphone() as source2:
+                r.adjust_for_ambient_noise(source2, duration = .5)
+                r.pause_threshold = 2
+                audio2 = r.listen(source2)
+                myText = r.recognize_google(audio2)
+                waiting = False
+                return myText
+
+        except sr.RequestError as e:
+            print("Could not request results; {0}".format(e))
+            waiting = True
+        except sr.UnknownValueError:
+            #print("Unknown error occurred")
+            waiting = True
+
+def printLog(): 
+    printlog = input("Do you want the message log? ") 
+    if printlog.lower() == "y" or printlog.lower() == "yes": 
+        for i in range(len(messageLog)): 
+            print(f"{messageLog[i]["role"]} : {messageLog[i]["message"]} ")
+
+def findFiles():
+    load_dotenv()
+    recordings = []
+    location = input("What is the path to the folder of voicemails: ")
+    for file in os.listdir(location):
+        recordings.append(BytesIO(open(f"{location}/{file}", "rb").read()))
+    return recordings
+
+def createVoice():
+    name = input("What do you want to call this voice? ")
+    voice = elevenlabs.voices.ivc.create(name=name, files=findFiles())
+    print(f"Voice ID: {voice.voice_id}")
+
+def use_voice(id, message):
+    audio_stream = elevenlabs.text_to_speech.stream(
+        text=message,
+        voice_id=id,
+        model_id="eleven_multilingual_v2",
+    )
+    stream(audio_stream)
+def voiceIDFind():
+    namesToID = []
+    createVoiceNeeded = input("Do you need to create a voice ID? ")
+    if createVoiceNeeded.lower() == "yes" or createVoiceNeeded.lower() == "y" or createVoiceNeeded.lower() == "sure":
+        createVoice()
+    voiceList = input("Do you need a list of voice IDs? ")
+    temp = (elevenlabs.voices.search(category="cloned"))
+    if voiceList.lower() == "yes" or voiceList.lower() == "y" or voiceList.lower() == "sure":
+        for voice in temp.voices:
+            print(f"{voice.name} : {voice.voice_id}")
+    for voice in temp.voices:
+        namesToID.append({"name" : voice.name, "id" : voice.voice_id})
+    useVoiceID = input("Whose voice do you want to use? ")
+    for name in namesToID:
+        if useVoiceID == name["name"]:
+            useVoiceID = name["id"]
+    return useVoiceID
+
+voiceID = voiceIDFind()
+current_id = priming(current_id)   
+messageContent(current_id)
+printLog()
